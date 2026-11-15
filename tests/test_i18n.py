@@ -19,7 +19,7 @@ def test_every_language_has_a_complete_file():
 def test_translation_and_formatting():
     i18n.set_language("de")
     assert i18n.t("ctl.start") == "Start"
-    assert "13 Mbit/s" in i18n.t("stat.limited", name="x.exe", limit="13 Mbit/s")
+    assert i18n.t("tray.active", count=3, down="1 Mbit/s", up="0 Mbit/s").startswith("3 aktiv")
 
 
 def test_unknown_key_returns_key():

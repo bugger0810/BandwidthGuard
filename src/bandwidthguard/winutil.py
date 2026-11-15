@@ -13,7 +13,9 @@ from typing import List
 from .paths import is_frozen
 
 MUTEX_NAME = "BandwidthGuardMutex"          # must match AppMutex in installer/BandwidthGuard.iss
-APP_USER_MODEL_ID = "bugger0810.BandwidthGuard"
+# Windows shows this ID as the app name in notifications when no Start-menu shortcut
+# with the same ID exists. Keep it identical to AppUserModelID in installer/BandwidthGuard.iss.
+APP_USER_MODEL_ID = "BandwidthGuard"
 ERROR_ALREADY_EXISTS = 183
 
 _mutex_handle = None  # kept alive for the whole process lifetime

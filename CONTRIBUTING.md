@@ -24,10 +24,12 @@ python -m pytest
 
 | Path | Content |
 |------|---------|
-| `src/bandwidthguard/engine.py` | Packet capture, measuring and throttling (no GUI code) |
+| `src/bandwidthguard/engine.py` | Packet capture, measuring and throttling of several programs (no GUI code) |
+| `src/bandwidthguard/pacing.py` | Pure rate-pacing logic (unit-tested) |
 | `src/bandwidthguard/main_window.py` | Main window, tray icon |
 | `src/bandwidthguard/dialogs.py` | Settings and About dialogs |
 | `src/bandwidthguard/widgets.py` | Custom widgets: switch, graph |
+| `src/bandwidthguard/rule_card.py` | The card shown for every active limit |
 | `src/bandwidthguard/theme.py` | Dark / light palettes and stylesheet |
 | `src/bandwidthguard/i18n.py`, `locales/*.json` | Translations |
 | `src/bandwidthguard/autostart.py` | Autostart via scheduled task |

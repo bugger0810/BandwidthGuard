@@ -92,16 +92,17 @@ QToolTip { background: $card; color: $text; border: 1px solid $border; padding: 
 
 /* ---- cards and tiles ------------------------------------------------- */
 QFrame#card { background: $card; border: 1px solid $border; border-radius: 14px; }
-QFrame#tile { background: $graph_bg; border: 1px solid $border; border-radius: 12px; }
+QFrame#ruleCard { background: $graph_bg; border: 1px solid $border; border-radius: 12px; }
+QScrollArea { background: transparent; border: none; }
+QScrollArea > QWidget > QWidget { background: transparent; }
 
 /* ---- text styles ------------------------------------------------------ */
 QLabel#h1 { font-size: 22px; font-weight: 700; }
 QLabel#h2 { font-size: 15px; font-weight: 600; }
-QLabel#muted, QLabel#statUnit, QLabel#statSub { color: $muted; }
-QLabel#statValue { font-size: 30px; font-weight: 700; }
+QLabel#muted { color: $muted; }
 QLabel#selectedName { font-size: 15px; font-weight: 600; }
-QLabel#pill { background: $field; border: 1px solid $border; border-radius: 10px; padding: 7px 12px; color: $muted; }
-QLabel#pill[state="running"] { color: $accent; border: 1px solid $accent; }
+QLabel#rate { font-size: 16px; font-weight: 700; }
+QLabel#chip { background: $field; border: 1px solid $border; border-radius: 8px; padding: 4px 10px; color: $accent; font-weight: 600; }
 
 /* ---- inputs ------------------------------------------------------------ */
 QLineEdit { background: $field; border: 1px solid $border; border-radius: 8px; padding: 7px 10px;
@@ -120,6 +121,9 @@ QPushButton#primary:pressed { background: $accent_pressed; }
 QPushButton#primary:disabled { background: $border; border-color: $border; color: $muted; }
 QPushButton#primary[running="true"] { background: $danger; border-color: $danger; }
 QPushButton#primary[running="true"]:hover { background: $danger_hover; border-color: $danger_hover; }
+
+QPushButton#dangerSmall { background: transparent; border: 1px solid $danger; color: $danger; padding: 5px 14px; }
+QPushButton#dangerSmall:hover { background: $danger; color: #ffffff; }
 
 /* segmented control (unit selector) */
 QPushButton#seg { border-radius: 0px; padding: 7px 14px; }

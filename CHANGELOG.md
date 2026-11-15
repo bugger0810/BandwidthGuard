@@ -3,6 +3,21 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
+## [1.0.1]
+
+### Added
+- **Limit several programs at the same time**, each with its own independent limit, live speed,
+  totals and graph ("Active limits" list). A limit can be changed on the fly ("Update limit").
+- Programs with an active limit are highlighted in the program list.
+
+### Changed
+- The tray tooltip shows the combined speed of all active limits; the tray menu stops all limits at once.
+
+### Fixed
+- Controls (limit field, unit buttons, Start button, ...) could be cut off right after opening the window.
+  The window now never gets smaller than its content needs.
+- Windows notifications showed "bugger0810.BandwidthGuard" as the app name; they now show "BandwidthGuard".
+
 ## [1.0.0] – Initial release
 
 ### Added

@@ -23,6 +23,7 @@ Leitung bleibt für alles andere frei.
 ## Funktionen
 
 - 🎯 **Download-Limit pro Programm** (Mbit/s oder MB/s)
+- 🧩 **Mehrere Programme gleichzeitig, jedes mit eigenem, unabhängigem Limit** (z. B. Programm X mit 10 Mbit/s, Programm Y mit 11 Mbit/s)
 - 📊 **Live-Traffic-Anzeige** mit Download/Upload, Gesamtmenge und 60-Sekunden-Diagramm
 - 👀 **„Nur messen“-Modus**, um zu sehen, was ein Programm wirklich zieht
 - 🔎 Programmliste mit **Suche, Icons und Verbindungsanzahl**
@@ -45,7 +46,9 @@ BandwidthGuard braucht **Administratorrechte**, da es einen Paketfilter-Treiber 
 
 1. BandwidthGuard starten und ein Programm in der Liste auswählen.
 2. Limit eingeben (z. B. `13`) und Einheit wählen.
-3. **Start** klicken. Mit **Stopp** ist sofort wieder alles normal.
+3. **Start** klicken. Das Programm erscheint unter **Aktive Begrenzungen** mit eigener Live-Anzeige und eigenem Diagramm.
+4. Beliebig viele weitere Programme hinzufügen – jedes Limit arbeitet unabhängig.
+5. Mit **Stopp** auf der Karte eines Programms ist dessen Limit sofort beendet. Wählst du ein begrenztes Programm erneut aus, kannst du sein Limit ändern (**Limit ändern**).
 
 Beim Schließen des Fensters läuft das Programm im Infobereich weiter (in den Einstellungen änderbar).
 

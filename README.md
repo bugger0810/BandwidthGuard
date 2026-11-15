@@ -31,6 +31,7 @@ and the rest of your connection stays free for everything else.
 ## Features
 
 - 🎯 **Per-program download limit** (Mbit/s or MB/s)
+- 🧩 **Several programs at once, each with its own independent limit** (e.g. program X at 10 Mbit/s, program Y at 11 Mbit/s)
 - 📊 **Live traffic monitor** – download/upload speed, totals and a 60-second graph
 - 👀 **"Measure only" mode** to see what a program really uses, without limiting it
 - 🔎 Program list with **search, icons and connection counts**
@@ -56,7 +57,9 @@ BandwidthGuard needs **administrator rights** because it uses a packet-filter dr
 1. Start BandwidthGuard.
 2. Select a program in the list (use the search box; programs without network activity are hidden by default).
 3. Enter the limit (e.g. `13`) and pick the unit.
-4. Click **Start**. Click **Stop** to return to normal at any time.
+4. Click **Start**. The program appears under **Active limits** with its own live speed and graph.
+5. Repeat for as many programs as you like – every limit works independently.
+6. Click **Stop** on a program's card to end its limit. Select a limited program again to change its limit (**Update limit**).
 
 Closing the window keeps BandwidthGuard running in the system tray (can be changed in *Settings*).
 

@@ -1,4 +1,4 @@
-"""The main window: program list, limit controls, live traffic and tray icon."""
+"""The main window: program list, limit controls, active limits and tray icon."""
 
 from __future__ import annotations
 
@@ -6,28 +6,26 @@ import time
 from typing import Dict, Optional
 
 from PySide6.QtCore import QFileInfo, QRegularExpression, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QIcon, QPixmap, QRegularExpressionValidator
+from PySide6.QtGui import QAction, QColor, QIcon, QPixmap, QRegularExpressionValidator
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QFileIconProvider, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QSystemTrayIcon,
-    QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QButtonGroup, QFileIconProvider, QFrame, QHBoxLayout, QHeaderView,
+    QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QSystemTrayIcon, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import autostart, i18n, theme
 from .dialogs import AboutDialog, SettingsDialog
 from .engine import BandwidthEngine
-from .formatting import (
-    UNIT_MBIT, UNIT_MBYTE, bytes_per_s_to_mbit, bytes_per_s_to_mbyte, format_bytes, format_limit,
-    parse_number, to_mbit,
-)
+from .formatting import UNIT_MBIT, UNIT_MBYTE, bytes_per_s_to_mbit, format_limit, parse_number, to_mbit
 from .i18n import t
 from .paths import ASSETS_DIR
 from .processes import list_process_groups
+from .rule_card import RuleCard
 from .settings import Settings
-from .widgets import Card, Switch, Tile, TrafficGraph
+from .widgets import Card, Switch
 from .winutil import set_dark_titlebar
 
-TICK_MS = 500             # how often the traffic display updates
+TICK_MS = 500              # how often the traffic display updates
 PROCESS_REFRESH_MS = 4000  # how often the program list refreshes
 
 
@@ -36,51 +34,10 @@ def app_icon() -> QIcon:
 
 
 def repolish(widget: QWidget) -> None:
-    """Re-apply the stylesheet after a dynamic property (e.g. ``running``) changed."""
+    """Re-apply the stylesheet after a dynamic property changed."""
     widget.style().unpolish(widget)
     widget.style().polish(widget)
     widget.update()
-
-
-class StatTile(Tile):
-    """One statistics box: coloured title, big Mbit/s value, MB/s and running total."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(2)
-
-        head = QHBoxLayout()
-        head.setSpacing(6)
-        self.dot = QLabel("●")
-        self.title = QLabel()
-        self.title.setObjectName("muted")
-        head.addWidget(self.dot)
-        head.addWidget(self.title)
-        head.addStretch(1)
-        layout.addLayout(head)
-
-        value_row = QHBoxLayout()
-        value_row.setSpacing(6)
-        self.value = QLabel("0.00")
-        self.value.setObjectName("statValue")
-        unit = QLabel("Mbit/s")
-        unit.setObjectName("statUnit")
-        value_row.addWidget(self.value, 0, Qt.AlignmentFlag.AlignBottom)
-        value_row.addWidget(unit, 0, Qt.AlignmentFlag.AlignBottom)
-        value_row.addStretch(1)
-        layout.addLayout(value_row)
-
-        self.sub = QLabel("0.00 MB/s")
-        self.sub.setObjectName("statSub")
-        self.total = QLabel()
-        self.total.setObjectName("statSub")
-        layout.addWidget(self.sub)
-        layout.addWidget(self.total)
-
-    def set_color(self, color: str) -> None:
-        self.dot.setStyleSheet(f"color: {color}; font-size: 11px;")
 
 
 class MainWindow(QMainWindow):
@@ -93,22 +50,19 @@ class MainWindow(QMainWindow):
 
         # --- state -----------------------------------------------------------
         self._selected: Optional[str] = settings.last_process or None
-        self._ui_running = False          # True between Start and Stop
-        self._state = "ready"             # "ready" | "limited" | "measuring" | "stopped"
-        self._run_name = ""
-        self._run_limit_text = ""
+        self._cards: Dict[str, RuleCard] = {}   # lower-case program name -> card of the active limit
+        self._last_time = 0.0
         self._quitting = False
         self._tray_notified = False
-        self._last_snapshot = (0, 0)
-        self._last_time = 0.0
+        self._shown_once = False
         self._unit = settings.unit if settings.unit in (UNIT_MBIT, UNIT_MBYTE) else UNIT_MBIT
         self._icon_provider = QFileIconProvider()
         self._icon_cache: Dict[str, QIcon] = {}
+        self._exe_by_key: Dict[str, Optional[str]] = {}   # lower-case name -> .exe path (from the last refresh)
         self._settings_dialog: Optional[SettingsDialog] = None
         self._about_dialog: Optional[AboutDialog] = None
 
         self.setWindowIcon(app_icon())
-        self.setMinimumSize(960, 640)
         self.resize(settings.window_width, settings.window_height)
 
         self._build_ui()
@@ -116,6 +70,7 @@ class MainWindow(QMainWindow):
         self.retranslate()
         self._apply_theme_to_widgets()
         self.refresh_processes()
+        self._update_min_size()
 
         self._tick_timer = QTimer(self)
         self._tick_timer.timeout.connect(self._tick)
@@ -142,7 +97,7 @@ class MainWindow(QMainWindow):
         right = QVBoxLayout()
         right.setSpacing(18)
         right.addWidget(self._build_control_card())
-        right.addWidget(self._build_traffic_card(), 1)
+        right.addWidget(self._build_rules_card(), 1)
         body.addLayout(right, 10)
         outer.addLayout(body, 1)
 
@@ -196,6 +151,7 @@ class MainWindow(QMainWindow):
 
         self.search = QLineEdit()
         self.search.setClearButtonEnabled(True)
+        self.search.setMinimumHeight(38)
         self.search.textChanged.connect(lambda _text: self.refresh_processes())
         layout.addWidget(self.search)
 
@@ -233,6 +189,9 @@ class MainWindow(QMainWindow):
 
     def _build_control_card(self) -> Card:
         card = Card()
+        # The card always keeps the height its content needs. Without this, Qt squeezed
+        # the widgets inside when the window was too small ("cut-off" controls).
+        card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(10)
@@ -257,21 +216,23 @@ class MainWindow(QMainWindow):
         limit_row.setSpacing(12)
         self.limit_edit = QLineEdit(f"{self.settings.limit:g}")
         self.limit_edit.setFixedWidth(96)
+        self.limit_edit.setMinimumHeight(38)
         self.limit_edit.setValidator(QRegularExpressionValidator(QRegularExpression(r"^\d{0,5}([.,]\d{0,2})?$")))
         limit_row.addWidget(self.limit_edit)
 
         # Segmented unit selector: [ Mbit/s | MB/s ]
         self.unit_mbit = QPushButton("Mbit/s")
         self.unit_mbyte = QPushButton("MB/s")
-        group = QButtonGroup(self)
-        group.setExclusive(True)
+        self._unit_group = QButtonGroup(self)
+        self._unit_group.setExclusive(True)
         for button, position, unit in ((self.unit_mbit, "left", UNIT_MBIT), (self.unit_mbyte, "right", UNIT_MBYTE)):
             button.setObjectName("seg")
             button.setProperty("pos", position)
             button.setCheckable(True)
+            button.setMinimumHeight(38)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.clicked.connect(lambda _checked=False, u=unit: self._set_unit(u))
-            group.addButton(button)
+            self._unit_group.addButton(button)
             limit_row.addWidget(button)
         (self.unit_mbyte if self._unit == UNIT_MBYTE else self.unit_mbit).setChecked(True)
         limit_row.addStretch(1)
@@ -289,37 +250,44 @@ class MainWindow(QMainWindow):
 
         self.start_button = QPushButton()
         self.start_button.setObjectName("primary")
+        self.start_button.setMinimumHeight(46)
         self.start_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.start_button.clicked.connect(self.toggle)
+        self.start_button.clicked.connect(self._start_rule)
         layout.addSpacing(6)
         layout.addWidget(self.start_button)
-
-        self.status_pill = QLabel()
-        self.status_pill.setObjectName("pill")
-        self.status_pill.setProperty("state", "idle")
-        layout.addWidget(self.status_pill)
         return card
 
-    def _build_traffic_card(self) -> Card:
+    def _build_rules_card(self) -> Card:
+        """The list of active limits: one :class:`RuleCard` per program, scrollable."""
         card = Card()
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setContentsMargins(20, 18, 14, 18)
         layout.setSpacing(12)
 
-        self.traffic_title = QLabel()
-        self.traffic_title.setObjectName("h2")
-        layout.addWidget(self.traffic_title)
+        self.rules_title = QLabel()
+        self.rules_title.setObjectName("h2")
+        layout.addWidget(self.rules_title)
 
-        tiles = QHBoxLayout()
-        tiles.setSpacing(12)
-        self.down_tile = StatTile()
-        self.up_tile = StatTile()
-        tiles.addWidget(self.down_tile)
-        tiles.addWidget(self.up_tile)
-        layout.addLayout(tiles)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setMinimumHeight(170)
+        content = QWidget()
+        self._rules_layout = QVBoxLayout(content)
+        self._rules_layout.setContentsMargins(0, 0, 6, 0)
+        self._rules_layout.setSpacing(12)
 
-        self.graph = TrafficGraph()
-        layout.addWidget(self.graph, 1)
+        self.empty_label = QLabel()
+        self.empty_label.setObjectName("muted")
+        self.empty_label.setWordWrap(True)
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        self.empty_label.setContentsMargins(10, 28, 10, 0)
+        self._rules_layout.addWidget(self.empty_label)
+        self._rules_layout.addStretch(1)       # keeps the cards at the top; cards are inserted before it
+
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
         return card
 
     def _build_tray(self) -> None:
@@ -329,7 +297,7 @@ class MainWindow(QMainWindow):
         self.tray_open_action = QAction(self)
         self.tray_open_action.triggered.connect(self.show_window)
         self.tray_stop_action = QAction(self)
-        self.tray_stop_action.triggered.connect(self._stop)
+        self.tray_stop_action.triggered.connect(self._stop_all)
         self.tray_stop_action.setEnabled(False)
         self.tray_quit_action = QAction(self)
         self.tray_quit_action.triggered.connect(self.quit_app)
@@ -342,6 +310,31 @@ class MainWindow(QMainWindow):
         self.tray.activated.connect(self._on_tray_activated)
         if self.tray_available:
             self.tray.show()
+
+    # ====================================================================
+    # Window size safety net
+    # ====================================================================
+    def _update_min_size(self) -> None:
+        """Never let the window become smaller than its content needs.
+
+        This is what prevents clipped widgets: the minimum size is calculated from the
+        real content (after the stylesheet has been applied) instead of a fixed guess.
+        It is limited to the screen size so the window always stays reachable.
+        """
+        self.ensurePolished()
+        central = self.centralWidget()
+        central.ensurePolished()
+        central.layout().activate()
+        needed = central.minimumSizeHint()
+
+        screen = self.screen()
+        max_w = screen.availableGeometry().width() - 40 if screen else 10_000
+        max_h = screen.availableGeometry().height() - 60 if screen else 10_000
+        min_w = min(max(needed.width(), 960), max_w)
+        min_h = min(max(needed.height(), 560), max_h)
+        self.setMinimumSize(min_w, min_h)
+        if self.width() < min_w or self.height() < min_h:
+            self.resize(max(self.width(), min_w), max(self.height(), min_h))
 
     # ====================================================================
     # Texts and theme
@@ -365,37 +358,40 @@ class MainWindow(QMainWindow):
         self.measure_label.setText(t("ctl.measure_only"))
         self._update_selected_label()
         self._update_start_button()
-        self._update_status()
 
-        self.traffic_title.setText(t("traf.title"))
-        self.down_tile.title.setText(t("traf.down"))
-        self.up_tile.title.setText(t("traf.up"))
-        totals = self.engine.snapshot() if self._ui_running else self._last_snapshot
-        self._update_totals(*totals)
+        self.rules_title.setText(t("rules.title"))
+        self.empty_label.setText(t("rules.empty"))
+        for card in self._cards.values():
+            card.retranslate()
 
         self.tray_open_action.setText(t("tray.open"))
         self.tray_stop_action.setText(t("tray.stop"))
         self.tray_quit_action.setText(t("tray.quit"))
-        self.tray.setToolTip(t("tray.idle"))
+        if not self._cards:
+            self.tray.setToolTip(t("tray.idle"))
 
         if self._settings_dialog is not None:
             self._settings_dialog.retranslate()
         if self._about_dialog is not None:
             self._about_dialog.retranslate()
+        if self._shown_once:
+            QTimer.singleShot(0, self._update_min_size)   # texts changed -> sizes may have changed
 
     def _apply_theme_to_widgets(self) -> None:
         """Update the parts that are not covered by the global stylesheet."""
         palette = theme.current()
-        self.down_tile.set_color(palette.down)
-        self.up_tile.set_color(palette.up)
         for switch in (self.only_net_switch, self.measure_switch):
             switch.update()
-        self.graph.update()
+        for card in self._cards.values():
+            card.apply_palette()
         set_dark_titlebar(self, palette.is_dark)
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         super().showEvent(event)
         set_dark_titlebar(self, theme.current().is_dark)
+        if not self._shown_once:
+            self._shown_once = True
+            QTimer.singleShot(0, self._update_min_size)   # re-check once everything is really laid out
 
     # ====================================================================
     # Callbacks used by the dialogs
@@ -409,6 +405,7 @@ class MainWindow(QMainWindow):
         self.settings.theme = name
         theme.apply_theme(QApplication.instance(), name)
         self._apply_theme_to_widgets()
+        self.refresh_processes()                      # active rows use the accent colour
         for dialog in (self._settings_dialog, self._about_dialog):
             if dialog is not None:
                 dialog.refresh_titlebar()
@@ -435,16 +432,23 @@ class MainWindow(QMainWindow):
         """Rebuild the table while keeping the selection and scroll position."""
         needle = self.search.text().strip().lower()
         only_network = self.only_net_switch.isChecked()
+        selected_key = (self._selected or "").lower()
+
+        groups = list_process_groups()
+        self._exe_by_key = {g.name.lower(): g.exe for g in groups}
 
         rows = []
-        for group in list_process_groups():
-            if needle and needle not in group.name.lower():
+        for group in groups:
+            key = group.name.lower()
+            if needle and needle not in key:
                 continue
-            if only_network and group.connections == 0 and group.name != self._selected:
+            # Programs with an active limit and the selected program always stay visible.
+            if only_network and group.connections == 0 and key != selected_key and key not in self._cards:
                 continue
             rows.append(group)
         rows.sort(key=lambda g: (-g.connections, g.name.lower()))
 
+        accent = QColor(theme.current().accent)
         scroll = self.table.verticalScrollBar().value()
         self.table.setUpdatesEnabled(False)
         self.table.blockSignals(True)
@@ -454,6 +458,8 @@ class MainWindow(QMainWindow):
             name_item = QTableWidgetItem(group.name)
             name_item.setData(Qt.ItemDataRole.UserRole, group.name)
             name_item.setIcon(self._icon_for(group.exe))
+            if group.name.lower() in self._cards:
+                name_item.setForeground(accent)       # highlight programs that are being limited
             inst_item = QTableWidgetItem(str(group.instances))
             conn_item = QTableWidgetItem(str(group.connections))
             for item in (inst_item, conn_item):
@@ -461,7 +467,7 @@ class MainWindow(QMainWindow):
             self.table.setItem(row, 0, name_item)
             self.table.setItem(row, 1, inst_item)
             self.table.setItem(row, 2, conn_item)
-            if group.name == self._selected:
+            if group.name.lower() == selected_key:
                 selected_row = row
         if selected_row >= 0:
             self.table.selectRow(selected_row)
@@ -487,6 +493,9 @@ class MainWindow(QMainWindow):
             item = self.table.item(rows[0].row(), 0)
             if item is not None:
                 self._selected = item.data(Qt.ItemDataRole.UserRole)
+                card = self._cards.get(self._selected.lower())
+                if card is not None:                  # show the settings of the existing limit
+                    self._load_controls(card.value, card.unit, card.measure_only)
         self._update_selected_label()
         self._update_start_button()
 
@@ -506,35 +515,24 @@ class MainWindow(QMainWindow):
             self.limit_edit.setText(f"{round(converted, 2):g}")
         self._unit = unit
 
+    def _load_controls(self, value: float, unit: str, measure_only: bool) -> None:
+        """Fill the input controls with the settings of an existing limit (no conversion)."""
+        self.limit_edit.setText(f"{value:g}")
+        self._unit = unit
+        (self.unit_mbyte if unit == UNIT_MBYTE else self.unit_mbit).setChecked(True)
+        self.measure_switch.setChecked(measure_only)
+
     def _update_start_button(self) -> None:
-        self.start_button.setText(t("ctl.stop") if self._ui_running else t("ctl.start"))
-        self.start_button.setProperty("running", self._ui_running)
-        self.start_button.setEnabled(self._ui_running or bool(self._selected))
-        repolish(self.start_button)
-
-    def _update_status(self) -> None:
-        if self._state == "limited":
-            text = t("stat.limited", name=self._run_name, limit=self._run_limit_text)
-        elif self._state == "measuring":
-            text = t("stat.measuring", name=self._run_name)
-        elif self._state == "stopped":
-            text = t("stat.stopped")
-        else:
-            text = t("stat.ready")
-        self.status_pill.setText(text)
-        self.status_pill.setProperty("state", "running" if self._ui_running else "idle")
-        repolish(self.status_pill)
+        """"Start" for a new program, "Update limit" if the selected program is already limited."""
+        already = bool(self._selected) and self._selected.lower() in self._cards
+        self.start_button.setText(t("ctl.update") if already else t("ctl.start"))
+        self.start_button.setEnabled(bool(self._selected))
 
     # ====================================================================
-    # Start / stop
+    # Start / stop of individual limits
     # ====================================================================
-    def toggle(self) -> None:
-        if self._ui_running:
-            self._stop()
-        else:
-            self._start()
-
-    def _start(self) -> None:
+    def _start_rule(self) -> None:
+        """Start (or update) the limit for the selected program."""
         if not self._selected:
             QMessageBox.information(self, t("err.title"), t("err.no_sel"))
             return
@@ -543,86 +541,100 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, t("err.title"), t("err.bad_limit"))
             return
 
-        mbit = to_mbit(value, self._unit)
-        throttle = not self.measure_switch.isChecked()
+        name = self._selected
+        measure_only = self.measure_switch.isChecked()
+        limit_mbit = None if measure_only else to_mbit(value, self._unit)
         try:
-            self.engine.start(self._selected, mbit, throttle)
+            self.engine.add_rule(name, limit_mbit)
         except Exception as exc:  # no admin rights, driver blocked, pydivert missing ...
             QMessageBox.critical(self, t("err.title"), t("err.start", error=exc))
             return
 
-        self._run_name = self._selected
-        self._run_limit_text = format_limit(value, self._unit)
-        self._state = "limited" if throttle else "measuring"
-        self._last_snapshot = (0, 0)
-        self._last_time = time.perf_counter()
-        self.graph.clear()
-        self.graph.set_limit(mbit if throttle else None, t("traf.limit", value=self._run_limit_text))
-        self._set_running_ui(True)
+        key = name.lower()
+        card = self._cards.get(key)
+        if card is None:
+            card = RuleCard(name, self._icon_for(self._exe_by_key.get(name.lower())))
+            card.stop_requested.connect(self._stop_rule)
+            self._cards[key] = card
+            self._rules_layout.insertWidget(self._rules_layout.count() - 1, card)   # before the stretch
+        if len(self._cards) == 1:
+            self._last_time = time.perf_counter()
+        card.configure(limit_mbit, format_limit(value, self._unit), value, self._unit, measure_only)
+        card.apply_palette()
+        self._after_rules_changed()
 
-    def _stop(self) -> None:
+    def _stop_rule(self, key: str) -> None:
+        """Stop the limit of one program (emitted by the card's Stop button)."""
+        card = self._cards.get(key)
+        if card is None:
+            return
+        self.engine.remove_rule(card.name)
+        self._remove_card(key)
+        self._after_rules_changed()
+
+    def _stop_all(self) -> None:
+        """Stop every active limit (tray menu)."""
         self.engine.stop()
-        self._state = "stopped"
-        self._set_running_ui(False)
-        self._show_rates(0.0, 0.0)
-        self.graph.set_limit(None)
-        self.tray.setToolTip(t("tray.idle"))
+        for key in list(self._cards):
+            self._remove_card(key)
+        self._after_rules_changed()
 
-    def _set_running_ui(self, running: bool) -> None:
-        """Enable/disable the controls that must not change while the engine runs."""
-        self._ui_running = running
-        for widget in (self.table, self.search, self.only_net_switch, self.limit_edit,
-                       self.unit_mbit, self.unit_mbyte, self.measure_switch):
-            widget.setEnabled(not running)
-        self.tray_stop_action.setEnabled(running)
+    def _remove_card(self, key: str) -> None:
+        card = self._cards.pop(key, None)
+        if card is not None:
+            self._rules_layout.removeWidget(card)
+            card.deleteLater()
+
+    def _after_rules_changed(self) -> None:
+        """Update everything that depends on whether/which limits are active."""
+        has_rules = bool(self._cards)
+        self.empty_label.setVisible(not has_rules)
+        self.tray_stop_action.setEnabled(has_rules)
+        if not has_rules:
+            self.tray.setToolTip(t("tray.idle"))
         self._update_start_button()
-        self._update_status()
+        self.refresh_processes()
 
     def _handle_engine_crash(self) -> None:
         """The packet filter died by itself – reset the UI and tell the user."""
         error = self.engine.error or "unknown error"
         self.engine.stop()
-        self._state = "ready"
-        self._set_running_ui(False)
-        self._show_rates(0.0, 0.0)
-        self.graph.set_limit(None)
+        for key in list(self._cards):
+            self._remove_card(key)
+        self._after_rules_changed()
         QMessageBox.critical(self, t("err.title"), t("err.stopped", error=error))
 
     # ====================================================================
     # Live traffic display
     # ====================================================================
     def _tick(self) -> None:
-        if not self._ui_running:
+        """Every 0.5 s: read the counters and update all cards."""
+        if not self._cards:
             return
         if not self.engine.running:
             self._handle_engine_crash()
             return
 
         now = time.perf_counter()
-        downloaded, uploaded = self.engine.snapshot()
         elapsed = max(now - self._last_time, 1e-3)
-        down_rate = (downloaded - self._last_snapshot[0]) / elapsed   # bytes per second
-        up_rate = (uploaded - self._last_snapshot[1]) / elapsed
-        self._last_snapshot = (downloaded, uploaded)
         self._last_time = now
+        snapshots = self.engine.snapshot_all()
 
-        self._show_rates(down_rate, up_rate)
-        self._update_totals(downloaded, uploaded)
-        self.graph.push(bytes_per_s_to_mbit(down_rate), bytes_per_s_to_mbit(up_rate))
+        total_down = total_up = 0.0
+        for key, card in self._cards.items():
+            downloaded, uploaded = snapshots.get(key, (card.last_in, card.last_out))
+            down_rate = (downloaded - card.last_in) / elapsed     # bytes per second
+            up_rate = (uploaded - card.last_out) / elapsed
+            card.last_in, card.last_out = downloaded, uploaded
+            card.update_stats(down_rate, up_rate, downloaded, uploaded)
+            total_down += down_rate
+            total_up += up_rate
+
         self.tray.setToolTip(t(
-            "tray.running", name=self._run_name,
-            down=f"{bytes_per_s_to_mbit(down_rate):.1f} Mbit/s",
-            up=f"{bytes_per_s_to_mbit(up_rate):.1f} Mbit/s",
+            "tray.active", count=len(self._cards),
+            down=f"{bytes_per_s_to_mbit(total_down):.1f} Mbit/s",
+            up=f"{bytes_per_s_to_mbit(total_up):.1f} Mbit/s",
         ))
-
-    def _show_rates(self, down_bps: float, up_bps: float) -> None:
-        for tile, rate in ((self.down_tile, down_bps), (self.up_tile, up_bps)):
-            tile.value.setText(f"{bytes_per_s_to_mbit(rate):.2f}")
-            tile.sub.setText(f"{bytes_per_s_to_mbyte(rate):.2f} MB/s")
-
-    def _update_totals(self, downloaded: int, uploaded: int) -> None:
-        self.down_tile.total.setText(t("traf.total", value=format_bytes(downloaded)))
-        self.up_tile.total.setText(t("traf.total", value=format_bytes(uploaded)))
 
     # ====================================================================
     # Tray icon, closing and quitting

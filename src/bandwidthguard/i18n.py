@@ -9,7 +9,7 @@ Usage::
     from bandwidthguard.i18n import t, set_language
     set_language("auto")            # or "de", "fr", ...
     label.setText(t("ctl.start"))
-    t("stat.limited", name="chrome.exe", limit="13 Mbit/s")
+    t("tray.active", count=2, down="1 Mbit/s", up="0 Mbit/s")
 """
 
 from __future__ import annotations
